@@ -533,7 +533,37 @@ using top and rear-side views. - Truck-arrival workflow: truck arrival,
 truck data/capacity/type, camera zone, top view, rear row view, data
 processing, software data collection, report generation. -
 Truck-departure workflow with a similar capture and reporting sequence.
-
+Cylinder Counting System
+│
+├── README.md
+├── requirements/
+│   └── project_requirements.md
+├── backend/
+│   ├── truck_management/
+│   ├── visit_management/
+│   ├── camera_management/
+│   ├── cylinder_detection/
+│   ├── count_reconciliation/
+│   ├── reports/
+│   └── audit_logs/
+├── frontend/
+│   ├── dashboard/
+│   ├── live_monitoring/
+│   ├── count_verification/
+│   └── reports/
+├── ai_models/
+│   ├── detection/
+│   ├── row_analysis/
+│   └── evaluation/
+├── database/
+│   └── schema/
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   └── accuracy/
+└── deployment/
+    ├── configuration/
+    └── backup/
 The source does not provide implementation-level specifications. All
 proposed modules, schema, validation rules, technology choices, and
 development phases above are planning recommendations to be confirmed
