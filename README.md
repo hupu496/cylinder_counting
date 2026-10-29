@@ -10,6 +10,11 @@
 
 The AI-Based Cylinder Counting, Cap Detection & Multi-Angle Inspection System is an **offline** solution that automates the cylinder unloading process using industrial cameras and Artificial Intelligence. The system counts cylinders, verifies the presence of safety caps, captures images from multiple angles, and generates digital reports.
 
+**Core logic:**
+
+- **Counting is scan-based** — a cylinder is counted only when it crosses the scan line in the counting bay (one crossing = one count, no duplicates).
+- **Camera placement is fixed by function** — one camera on **top of the counting bay** (scan-based counting + cap detection) and one camera at the **back of the truck** (loaded-row detection for the expected baseline count).
+
 **Why it is needed:**
 
 - Eliminate manual counting errors.
@@ -26,26 +31,28 @@ The AI-Based Cylinder Counting, Cap Detection & Multi-Angle Inspection System is
 
 When a truck enters the unloading bay, the system follows these steps:
 
-1. Truck arrives at the unloading bay.
-2. Application records truck information (registration, type, capacity).
-3. Workers unload cylinders.
-4. Cylinders move one by one on the conveyor.
-5. AI detects every cylinder.
-6. AI checks whether the safety cap is present.
-7. Multiple cameras capture cylinder images.
-8. Count is updated automatically.
-9. Final inspection report is generated.
+1. Truck arrives at the unloading bay — the **back-of-truck camera** captures the loaded truck bed.
+2. AI detects loaded **rows** from the back-of-truck view → `rows × cylinders_per_row` = **row-expected count** (baseline).
+3. Application records truck information (registration, type, capacity).
+4. Workers unload cylinders.
+5. Cylinders move one by one through the **counting bay** under the **top-mounted counting-bay camera**.
+6. AI **scan-counts** every cylinder as it crosses the scan line (one crossing = one count, no duplicates).
+7. AI checks whether the safety cap is present.
+8. Both cameras capture cylinder images (evidence frames linked to the session).
+9. Scan count is updated automatically (live).
+10. Scan count is **reconciled** against the rear-camera row-expected count → accuracy verdict.
+11. Final inspection report is generated.
 
 ### 2.2 Application flow by stage
 
 ```text
-TRUCK ARRIVAL                UNLOADING / CONVEYOR              INSPECTION & OUTPUT
-─────────────                ────────────────────              ───────────────────
-Truck arrives        →       Cylinders on conveyor      →      AI cylinder detection
-Record truck info    →       Cap presence check         →      Multi-angle capture
-Create visit/session →       Live count updated         →      Count + cap status stored
-                             Frame quality check        →      Operator review (if flagged)
-                                                            →   Inspection report (PDF/CSV)
+TRUCK ARRIVAL          SCAN COUNTING BAY           ROW CHECK (REAR)         INSPECTION & OUTPUT
+─────────────          ──────────────────           ────────────────         ───────────────────
+Truck arrives    →     Cylinder crosses      →     Rear cam detects   →     Scan vs row estimate
+Rear cam: rows   →     scan line             →     rows × per-row     →     reconciled count
+× per-row =      →     AI scan-count +       →     count (baseline)   →     Count + cap status
+baseline         →     cap check             →      Frame quality     →     Operator review
+Create session   →     Live count updated    →      check              →     Inspection report
 ```
 
 ### 2.3 Count data rules
@@ -68,17 +75,34 @@ Rules:
 - Low image quality or low confidence → flag for review, do not auto-accept.
 - Reports must label AI-estimated and operator-verified values distinctly.
 
+### 2.4 Scan-based counting rule
+
+The counting part shall be **scan-based**:
+
+- The **top-of-counting-bay camera** defines a virtual **scan line** over the bay exit path. A cylinder is counted **only when it crosses this line** — no crossing, no count.
+- One crossing = one count; re-detections of the same cylinder on the same crossing are suppressed (track ID + frame embedding de-duplication).
+- Each counted cylinder triggers the cap check and an evidence frame from both cameras in the same event.
+- The **back-of-truck camera** scans the loaded truck bed **before unloading** to detect **rows**; `rows × cylinders_per_row` becomes the expected baseline used to reconcile the running scan count.
+- If `|scan_count − row_baseline|` exceeds the allowed tolerance, the session is flagged `needs_recount` for operator review — the system never auto-adjusts either number.
+
 ---
 
 ## 3. Camera Placement
 
-| Camera | View | Purpose |
-|---|---|---|
-| Camera 1 | Top | Cylinder detection, counting, cap detection |
-| Camera 2 | Left side | Complete cylinder documentation, image verification |
-| Camera 3 | Right side | Complete cylinder documentation, image verification |
-| Camera 4/5 | Front / Rear (based on site requirement) | Full documentation, damage inspection (future enhancement) |
+Placement of the cameras is function-driven. Two cameras are **required** for the scan-based counting logic:
 
+| Camera | Placement | Purpose |
+|---|---|---|
+| **Camera 1 (required)** | **Top of the counting bay** (overhead, facing down across the scan line) | **Scan-based counting** — counts each cylinder as it crosses the scan line — plus safety-cap detection |
+| **Camera 2 (required)** | **Back of the truck** (fixed at the bay, viewing the loaded truck bed rows) | **Row detection** → `rows × cylinders_per_row` = row-expected baseline count |
+| Camera 3/4 (optional) | Left / Right side | Complete cylinder documentation, image verification |
+| Camera 5 (optional) | Front (based on site requirement) | Full documentation, damage inspection (future enhancement) |
+
+Placement rules:
+
+- **Camera 1 (top of counting bay):** mounted directly above the counting bay path so every unloaded cylinder passes through its field of view and crosses the scan line — full coverage of the bay width, no blind spots at the crossing point; the scan line is defined in calibration.
+- **Camera 2 (back of the truck):** mounted at bay level behind the truck so the entire loaded bed and all **rows** are visible before unloading starts; must see full width/depth of the rows, unobstructed by tarps/gates.
+- Required cameras must be online for a session to start; optional cameras are best-effort.
 - All cameras are time-synchronized; each captured frame is linked to a truck visit + counting session.
 - Camera credentials are stored encrypted (never in source control).
 
@@ -104,7 +128,7 @@ Reports are searchable, storable, and exportable (PDF / CSV / XLSX) for future r
 ```text
  ┌────────────────────────────────────────────────────────────────────────────┐
  │                          INDUSTRIAL CAMERAS (ON-PREM)                      │
- │  Cam1 Top (detect/count/cap)   Cam2 Left   Cam3 Right   Cam4/5 Front/Rear  │
+ │  Cam1 top of bay: scan-count   Cam2 back of truck: rows   Cam3/4 sides     │
  └───────────────┬────────────────────────┬───────────────────────────────────┘
                  │ RTSP/ONVIF frames      │
         ┌────────▼────────────────────────▼────────┐
@@ -116,7 +140,7 @@ Reports are searchable, storable, and exportable (PDF / CSV / XLSX) for future r
                          │
         ┌────────────────▼─────────────────────────┐
         │        AI VISION PIPELINE (offline)       │
-        │  1. Cylinder detection  (YOLO/segment.)   │
+        │  1. Scan-line cylinder counting (YOLO)    │
         │  2. Cap detection       (presence/absent) │
         │  3. Multi-angle capture reconciliation    │
         │  4. Quality / confidence scoring          │
@@ -143,7 +167,7 @@ Reports are searchable, storable, and exportable (PDF / CSV / XLSX) for future r
 
 ### Architecture layers
 
-1. **Edge/Camera layer** — industrial cameras on the unloading bay; RTSP/ONVIF streams or frame polling.
+1. **Edge/Camera layer** — industrial cameras: the **top-of-counting-bay camera** (scan-based counting, cap check) and the **back-of-truck camera** (row detection) are required; optional side/front cameras as needed. RTSP/ONVIF streams or frame polling.
 2. **Ingestion layer** — Celery workers grab frames, run quality checks, and write evidence files.
 3. **AI layer** — fully offline detection (cylinder + cap), multi-angle reconciliation, confidence flags, and embedding generation.
 4. **Application layer** — Django / Django REST Framework apps for visits, sessions, review, and reporting.
@@ -194,8 +218,8 @@ CREATE INDEX ON capture_frame
 |---|---|
 | `Truck` | `registration`, `truck_type`, `declared_capacity`, `active` |
 | `TruckVisit` | `truck`, `visit_reference`, `arrival_time`, `departure_time`, `status` |
-| `Camera` | `camera_code`, `view_type` (top/left/right/front/rear), `stream_ref` (encrypted), `calibration_config`, `active` |
-| `CountingSession` | `visit`, `event_type`, `ai_proposed_count`, `verified_count`, `cap_detected_count`, `cap_missing_count`, `count_variance`, `count_status`, `model_version`, `reviewed_by` |
+| `Camera` | `camera_code`, `view_type` (`top_counting_bay` / `rear_truck` / `left` / `right` / `front`), `required` (mandatory for scan counting), `stream_ref` (encrypted), `calibration_config` (incl. scan line), `active` |
+| `CountingSession` | `visit`, `event_type`, `detected_rows`, `cylinders_per_row`, `row_baseline_count` (rows × per-row), `scan_count`, `ai_proposed_count`, `verified_count`, `cap_detected_count`, `cap_missing_count`, `count_variance`, `count_status`, `model_version`, `reviewed_by` |
 | `Capture` | `session`, `camera`, `captured_at`, `image_ref`, `quality_status`, `embedding` |
 | `Detection` | `capture`, `class_name` (cylinder/cap), `bbox`, `confidence`, `track_ref` |
 | `CapResult` | `detection`, `cap_present`, `confidence` |
@@ -248,7 +272,7 @@ cylinder_counting/
 
 | Phase | Activity | Estimated Time |
 |---|---|---|
-| **Phase 1: Hardware Installation** | Mount HD cameras at the inspection bay; cabling and networking infrastructure for camera connectivity and data transmission. | 1–2 weeks |
+| **Phase 1: Hardware Installation** | Mount the **top-of-counting-bay camera** (over the scan line) and the **back-of-truck camera** (row detection); optional side cameras; cabling and networking infrastructure for camera connectivity and data transmission; scan-line calibration. | 1–2 weeks |
 | **Phase 2: Data Collection & AI Model Training** | Capture and label **1,500–2,000 images per truck type** based on location; train and validate the counting + cap detection models. | 3–4 weeks |
 | **Phase 3: Server Setup & Deployment** | Install the AI processing application on-site; integrate with existing plant operations and reporting systems; provision PostgreSQL + pgvector. | 1–2 weeks |
 | **Phase 4: Testing & Go-Live** | Pilot runs, iterative refinements, full-scale production deployment. | 2–3 weeks |
@@ -319,7 +343,9 @@ celery -A config worker --loglevel=info
 | Exact cylinder capacity per truck type | **Confirm with site owner** |
 | Cylinder types/sizes and mixed loads | TBD |
 | Camera make, resolution, FPS, lens, stream protocol | TBD |
-| Camera 4/5 (front/rear) site requirement | TBD |
+| Optional cameras (left/right/front) site requirement | TBD |
+| Scan-line definition & trigger method (virtual line vs. hardware trigger) | TBD |
+| Row-detection tolerance — allowed scan vs. row-baseline mismatch | TBD |
 | Counting live vs. after truck stops in bay | TBD |
 | Expected count accuracy and allowable error | TBD |
 | Evidence retention period | TBD |
